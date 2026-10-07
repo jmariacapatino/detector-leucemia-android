@@ -1,4 +1,4 @@
-# 🔬 Detector de Indicios de Leucemia Linfoblástica Aguda (LLA) — Android
+# Detector de Indicios de Leucemia Linfoblástica Aguda (LLA) — Android
 
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com/)
 [![Kotlin](https://img.shields.io/badge/Language-Kotlin-blue.svg)](https://kotlinlang.org/)
