@@ -11,7 +11,7 @@ Desarrollado como proyecto de tesis de pregrado en **Ingeniería de Software —
 
 ---
 
-## 📌 Descripción del Proyecto
+##  Descripción del Proyecto
 
 El sistema captura imágenes de muestras sanguíneas en tiempo real mediante **CameraX**, procesa los leucocitos a través de un pipeline automatizado con **OpenCV** y clasifica las células mediante una red neuronal convolucional (**MobileNetV2**) optimizada para inferencia en el borde (*Edge AI*) con **TensorFlow Lite**.
 
@@ -24,7 +24,7 @@ El sistema captura imágenes de muestras sanguíneas en tiempo real mediante **C
 
 ---
 
-## ⚙️ Arquitectura del Pipeline de Visión e Inferencia
+## Arquitectura del Pipeline de Visión e Inferencia
 
 ```text
 [ Entrada de Cámara (CameraX / YUV_420_888) ]
@@ -59,7 +59,7 @@ El sistema captura imágenes de muestras sanguíneas en tiempo real mediante **C
 
 ---
 
-## 🛠️ Tecnologías y Herramientas
+## Tecnologías y Herramientas
 
 - **Lenguaje:** Kotlin 1.9+
 - **Framework Móvil:** Android SDK (Min SDK: 24, Target SDK: 34+)
@@ -71,7 +71,7 @@ El sistema captura imágenes de muestras sanguíneas en tiempo real mediante **C
 
 ---
 
-## 🚀 Requisitos e Instalación
+## Requisitos e Instalación
 
 ### Requisitos Previos
 - Android Studio Ladybug / Koala o superior
@@ -90,7 +90,7 @@ El sistema captura imágenes de muestras sanguíneas en tiempo real mediante **C
 
 ---
 
-## 👤 Autor
+## Autor
 
 **José Manuel Mariaca**  
 - Carrera: Ingeniería de Software — Universidad San Ignacio de Loyola (USIL)  
