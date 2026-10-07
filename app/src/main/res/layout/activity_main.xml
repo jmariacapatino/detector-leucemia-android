@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Layout principal de la app Detector LLA.
+    Estructura:
+    ┌─────────────────────────────────┐
+    │        PreviewView (cámara)     │
+    │                                 │
+    │                                 │
+    │   ┌─────────────────────────┐   │
+    │   │   overlayPanel          │   │
+    │   │   · tvResult            │   │
+    │   │   · progressAll/HEM     │   │
+    │   │   · tvLatencyTemp       │   │
+    │   │   · tvModelStatus       │   │
+    │   └─────────────────────────┘   │
+    └─────────────────────────────────┘
+-->
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black"
+    tools:context=".MainActivity">
+
+    <!-- =====================================================
+         Visor de cámara en pantalla completa
+         Se coloca primero (z-order inferior) para que el
+         overlay panel quede visualmente encima.
+    ===================================================== -->
+    <androidx.camera.view.PreviewView
+        android:id="@+id/previewView"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:scaleType="fillCenter" />
+
+    <!-- =====================================================
+         Panel inferior de resultados
+         Fondo semitransparente oscuro con esquinas superiores
+         redondeadas para una apariencia de tarjeta emergente.
+    ===================================================== -->
+    <LinearLayout
+        android:id="@+id/overlayPanel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/bg_overlay_panel"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="16dp"
+        android:paddingBottom="20dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <!-- - Indicador de estado del modelo (parte superior del panel) - -->
+        <TextView
+            android:id="@+id/tvModelStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:text="@string/model_pending"
+            android:textSize="11sp"
+            android:textColor="@color/colorBlastoDetected"
+            android:textStyle="bold"
+            android:letterSpacing="0.08"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
+            android:background="@drawable/bg_status_badge"
+            android:layout_marginBottom="12dp" />
+
+        <!-- - Resultado principal de diagnóstico - -->
+        <TextView
+            android:id="@+id/tvResult"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/waiting_model"
+            android:textSize="26sp"
+            android:textStyle="bold"
+            android:textColor="@color/colorTextSecondary"
+            android:gravity="center"
+            android:letterSpacing="0.04"
+            android:layout_marginBottom="16dp"
+            tools:text="LEUCOCITO NORMAL" />
+
+        <!-- - Separador visual - -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#33FFFFFF"
+            android:layout_marginBottom="14dp" />
+
+        <!-- ========== Barra de probabilidad: ALL (blasto) ========== -->
+
+        <!-- Fila de etiqueta + porcentaje para ALL -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="4dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/label_all"
+                android:textSize="12sp"
+                android:textColor="@color/colorBlastoDetected"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvAllLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textColor="@color/colorTextSecondary"
+                tools:text="45%" />
+        </LinearLayout>
+
+        <!-- Barra de progreso ALL -->
+        <ProgressBar
+            android:id="@+id/progressAll"
+            style="@style/Widget.AppCompat.ProgressBar.Horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="10dp"
+            android:max="100"
+            android:progress="0"
+            android:progressTint="@color/colorBlastoDetected"
+            android:progressBackgroundTint="#33FF4444"
+            android:layout_marginBottom="12dp"
+            tools:progress="45" />
+
+        <!-- ========== Barra de probabilidad: HEM (normal) ========== -->
+
+        <!-- Fila de etiqueta + porcentaje para HEM -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="4dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/label_hem"
+                android:textSize="12sp"
+                android:textColor="@color/colorNormal"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvHemLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textColor="@color/colorTextSecondary"
+                tools:text="55%" />
+        </LinearLayout>
+
+        <!-- Barra de progreso HEM -->
+        <ProgressBar
+            android:id="@+id/progressHem"
+            style="@style/Widget.AppCompat.ProgressBar.Horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="10dp"
+            android:max="100"
+            android:progress="0"
+            android:progressTint="@color/colorNormal"
+            android:progressBackgroundTint="#3300C853"
+            android:layout_marginBottom="14dp"
+            tools:progress="55" />
+
+        <!-- - Separador visual - -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#33FFFFFF"
+            android:layout_marginBottom="10dp" />
+
+        <!-- - Latencia e información térmica del dispositivo - -->
+        <TextView
+            android:id="@+id/tvLatencyTemp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/latency_temp_default"
+            android:textSize="12sp"
+            android:textColor="@color/colorTextSecondary"
+            android:gravity="center"
+            android:drawablePadding="4dp"
+            tools:text="Latencia: 32ms | CPU Temp: 38.5°C" />
+
+    </LinearLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

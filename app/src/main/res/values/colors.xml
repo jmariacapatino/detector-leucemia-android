@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Paleta de colores de la app Detector LLA.
+    Diseñada para una interfaz oscura (dark UI) sobre el visor de cámara.
+-->
+<resources>
+
+    <!-- ============================================================
+         Colores de diagnóstico
+         Usados para resaltar el resultado principal de la inferencia
+    ============================================================ -->
+
+    <!-- Rojo/naranja para indicar detección de blasto leucémico (ALL) -->
+    <color name="colorBlastoDetected">#FF4444</color>
+
+    <!-- Verde para indicar leucocito normal (HEM / hemoglobina) -->
+    <color name="colorNormal">#00C853</color>
+
+    <!-- ============================================================
+         Colores de interfaz general
+    ============================================================ -->
+
+    <!-- Fondo semitransparente del panel de resultados (80% opacidad negro) -->
+    <color name="colorOverlay">#CC000000</color>
+
+    <!-- Color de acento/énfasis de la aplicación (Material Blue 500) -->
+    <color name="colorAccent">#2196F3</color>
+
+    <!-- Texto principal sobre fondo oscuro (blanco puro) -->
+    <color name="colorTextPrimary">#FFFFFF</color>
+
+    <!-- Texto secundario / información auxiliar (gris azulado claro) -->
+    <color name="colorTextSecondary">#B0BEC5</color>
+
+    <!-- ============================================================
+         Colores de soporte para drawables y elementos de UI
+    ============================================================ -->
+
+    <!-- Borde del panel overlay (gris translúcido) -->
+    <color name="colorOverlayBorder">#4DFFFFFF</color>
+
+    <!-- Fondo del badge de estado del modelo -->
+    <color name="colorStatusBadgeBg">#1AFFFFFF</color>
+
+    <!-- Color de fondo de la ventana principal (negro) -->
+    <color name="colorWindowBackground">#000000</color>
+
+    <!-- Variante oscura de la barra de progreso ALL (fondo de la barra) -->
+    <color name="colorAllProgressBg">#33FF4444</color>
+
+    <!-- Variante oscura de la barra de progreso HEM (fondo de la barra) -->
+    <color name="colorHemProgressBg">#3300C853</color>
+
+    <!-- Color de fondo del activity (mantiene compatibilidad con themes) -->
+    <color name="colorPrimary">#1A1A2E</color>
+    <color name="colorPrimaryDark">#0F0F1E</color>
+
+</resources>

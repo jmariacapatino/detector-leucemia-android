@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Fondo del badge de estado del modelo.
+    Forma redondeada (pill) con fondo semitransparente blanco.
+    Se usa para "● MODELO LISTO" y "● MODELO PENDIENTE".
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+
+    <solid android:color="@color/colorStatusBadgeBg" />
+
+    <corners android:radius="12dp" />
+
+    <stroke
+        android:width="1dp"
+        android:color="#33FFFFFF" />
+
+</shape>

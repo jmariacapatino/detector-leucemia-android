@@ -1,0 +1,18 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+**/build/
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+*.apk
+*.aar
+
+# Ignore heavy OpenCV static build archives (only needed when compiling OpenCV C++ from source)
+opencv/native/3rdparty/
+opencv/native/bin/
+opencv/native/staticlibs/

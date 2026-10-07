@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Cadenas de texto de la app Detector LLA.
+    Todos los textos visibles al usuario están en español.
+    Para futura internacionalización, crear res/values-en/strings.xml
+    con las traducciones correspondientes.
+-->
+<resources>
+
+    <!-- Nombre de la aplicación (mostrado en el launcher y barra de título) -->
+    <string name="app_name">Detector LLA</string>
+
+    <!-- ============================================================
+         Resultados de diagnóstico
+    ============================================================ -->
+
+    <!-- Etiqueta mostrada cuando se detecta un blasto leucémico (ALL) -->
+    <string name="result_blasto">⚠ BLASTO DETECTADO</string>
+
+    <!-- Etiqueta mostrada cuando el leucocito es normal (HEM) -->
+    <string name="result_normal">✓ LEUCOCITO NORMAL</string>
+
+    <!-- Texto de espera mientras el modelo no está cargado -->
+    <string name="waiting_model">Esperando modelo…</string>
+
+    <!-- ============================================================
+         Estado del modelo TFLite
+    ============================================================ -->
+
+    <!-- El archivo .tflite fue cargado correctamente -->
+    <string name="model_ready">● MODELO LISTO</string>
+
+    <!-- El archivo .tflite no se encontró en assets/ -->
+    <string name="model_pending">● MODELO PENDIENTE</string>
+
+    <!-- ============================================================
+         Etiquetas de las barras de probabilidad
+    ============================================================ -->
+
+    <!-- Etiqueta estática de la clase ALL -->
+    <string name="label_all">ALL (Blasto leucémico)</string>
+
+    <!-- Etiqueta estática de la clase HEM -->
+    <string name="label_hem">HEM (Leucocito normal)</string>
+
+    <!-- Etiqueta dinámica con porcentaje — %1$d se reemplaza con el valor int -->
+    <string name="label_all_prob">ALL: %1$d%%</string>
+    <string name="label_hem_prob">HEM: %1$d%%</string>
+
+    <!-- ============================================================
+         Línea de información de rendimiento
+    ============================================================ -->
+
+    <!-- Formato: "Latencia: 32ms | CPU Temp: 38.5°C"
+         %1$d = latencia en ms (Long), %2$s = temperatura como texto -->
+    <string name="latency_temp_format">Latencia: %1$dms  |  CPU Temp: %2$s</string>
+
+    <!-- Valor mostrado antes de recibir el primer resultado -->
+    <string name="latency_temp_default">Latencia: — ms  |  CPU Temp: — °C</string>
+
+    <!-- Cuando el sensor de temperatura no es accesible -->
+    <string name="temp_unavailable">N/D</string>
+
+    <!-- ============================================================
+         Mensajes de error y notificaciones del sistema
+    ============================================================ -->
+
+    <!-- Permiso de cámara denegado por el usuario -->
+    <string name="camera_permission_denied">
+        Permiso de cámara requerido para el funcionamiento de la app.
+    </string>
+
+    <!-- Error al inicializar OpenCV -->
+    <string name="opencv_error">
+        Error al inicializar OpenCV. La app puede no funcionar correctamente.
+    </string>
+
+    <!-- Error general al abrir la cámara -->
+    <string name="camera_error">
+        No se pudo inicializar la cámara. Verifique los permisos e intente de nuevo.
+    </string>
+
+    <!-- Mensaje informativo cuando el modelo no está en assets/ -->
+    <string name="model_missing_info">
+        El archivo modelo_lla_int8.tflite no se encontró en assets/.\nColóquelo y reinicie la app.
+    </string>
+
+</resources>
