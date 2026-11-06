@@ -1,179 +1,204 @@
 package com.example.detectorpatrones
 
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.graphics.Bitmap
+import android.os.BatteryManager
+import android.os.Debug
 import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
-import org.tensorflow.lite.Interpreter
+import org.json.JSONObject
+import org.opencv.android.Utils
 import org.opencv.core.*
 import org.opencv.imgproc.Imgproc
+import org.tensorflow.lite.Interpreter
+import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
+import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
 
 // ============================================================
-//  Resultado de una inferencia individual
+//  Resultado unificado para los 2 Instrumentos de Recolección:
+//  1. Matriz de registro de precisión diagnóstica
+//  2. Matriz de registro de rendimiento técnico
 // ============================================================
-/**
- * Encapsula el resultado completo de procesar un frame de cámara:
- * probabilidades de ambas clases, latencia, etiqueta ganadora
- * y métricas térmicas del dispositivo.
- */
 data class InferenceResult(
-    /** Probabilidad (0-1) de que sea un blasto leucémico (clase ALL) */
+    val paradigmName: String,
+    val sampleId: String,
+    val groundTruthLabel: String,
     val allProbability: Float,
-    /** Probabilidad (0-1) de que sea un leucocito normal (clase HEM) */
     val hemProbability: Float,
-    /** Tiempo de inferencia TFLite en milisegundos */
-    val latencyMs: Long,
-    /** Etiqueta final de la clase con mayor probabilidad: "ALL" o "HEM" */
     val label: String,
-    /** Temperatura CPU en grados Celsius (0.0 si el archivo sysfs no es accesible) */
+    val latencyMs: Long,
+    val ramUsageMb: Double,
     val cpuTempC: Double,
-    /** Frecuencia actual del núcleo CPU en MHz (0.0 si no es accesible) */
-    val cpuFreqMhz: Double
+    val cpuFreqMhz: Double,
+    val thermalThrottling: Boolean = false,
+    val errorMessage: String? = null
 )
 
 // ============================================================
-//  ThermalMonitor: lee temperatura y frecuencia CPU
-//  desde la interfaz sysfs de Linux/Android
+//  UnifiedPerformanceModule:
+//  Módulo unificado en Kotlin para el Instrumento 2
+//  (Matriz de registro de rendimiento técnico):
+//  Latencia (ms), Memoria RAM (MB), Temperatura (°C) y Frecuencia CPU (MHz)
 // ============================================================
-/**
- * Lee métricas de hardware del sistema de archivos virtual sysfs.
- * No requiere permisos especiales en la mayoría de dispositivos Android.
- */
-object ThermalMonitor {
+object UnifiedPerformanceModule {
 
-    private const val TAG = "ThermalMonitor"
+    private const val TAG = "UnifiedPerfModule"
+    private const val THERMAL_THROTTLING_THRESHOLD_C = 45.0
 
-    // Posibles rutas de temperatura (diferentes fabricantes)
     private val TEMP_PATHS = arrayOf(
         "/sys/class/thermal/thermal_zone0/temp",
         "/sys/class/thermal/thermal_zone1/temp",
+        "/sys/class/thermal/thermal_zone2/temp",
+        "/sys/class/thermal/thermal_zone3/temp",
         "/sys/devices/virtual/thermal/thermal_zone0/temp"
     )
 
-    // Posibles rutas de frecuencia CPU (núcleo 0)
-    private val FREQ_PATHS = arrayOf(
-        "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq",
-        "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq",
-        "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq"
-    )
+    fun startTimerNs(): Long = System.nanoTime()
 
-    /**
-     * Lee temperatura CPU en grados Celsius.
-     * sysfs reporta miligrados Celsius → dividir entre 1000.
-     * Si ninguna ruta es accesible, devuelve 0.0.
-     */
-    fun readCpuTemperatureCelsius(): Double {
+    fun measureLatencyMs(startTimeNs: Long): Long {
+        return ((System.nanoTime() - startTimeNs) / 1_000_000L).coerceAtLeast(1L)
+    }
+
+    fun readRamUsageMb(): Double {
+        return try {
+            val runtime = Runtime.getRuntime()
+            val javaHeapBytes = runtime.totalMemory() - runtime.freeMemory()
+            val nativeHeapBytes = Debug.getNativeHeapAllocatedSize()
+            (javaHeapBytes + nativeHeapBytes) / (1024.0 * 1024.0)
+        } catch (e: Exception) {
+            0.0
+        }
+    }
+
+    fun readTemperatureCelsius(context: Context): Double {
         for (path in TEMP_PATHS) {
             try {
-                val raw = java.io.File(path).readText().trim().toLong()
-                return raw / 1000.0
-            } catch (e: Exception) {
-                // Ignorar y probar la siguiente ruta
+                val f = File(path)
+                if (f.canRead()) {
+                    val raw = f.readText().trim().toDouble()
+                    val tempC = if (raw > 1000.0) raw / 1000.0 else if (raw > 100.0) raw / 10.0 else raw
+                    if (tempC in 15.0..95.0) {
+                        return tempC
+                    }
+                }
+            } catch (_: Exception) {
             }
         }
-        Log.w(TAG, "No se pudo leer temperatura CPU en ninguna ruta conocida")
+        return try {
+            val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val tempTenths = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+            if (tempTenths > 0) tempTenths / 10.0 else 0.0
+        } catch (e: Exception) {
+            Log.w(TAG, "No se pudo leer sensor térmico: ${e.message}")
+            0.0
+        }
+    }
+
+    fun readCpuFrequencyMhz(): Double {
+        for (core in 0..7) {
+            val paths = arrayOf(
+                "/sys/devices/system/cpu/cpu$core/cpufreq/scaling_cur_freq",
+                "/sys/devices/system/cpu/cpu$core/cpufreq/cpuinfo_cur_freq",
+                "/sys/devices/system/cpu/cpu$core/cpufreq/cpuinfo_max_freq"
+            )
+            for (path in paths) {
+                try {
+                    val f = File(path)
+                    if (f.canRead()) {
+                        val rawKhz = f.readText().trim().toLong()
+                        if (rawKhz > 0) {
+                            return rawKhz / 1000.0
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+        }
         return 0.0
     }
 
-    /**
-     * Lee frecuencia CPU en MHz.
-     * sysfs reporta kHz → dividir entre 1000.
-     * Si ninguna ruta es accesible, devuelve 0.0.
-     */
-    fun readCpuFrequencyMhz(): Double {
-        for (path in FREQ_PATHS) {
-            try {
-                val raw = java.io.File(path).readText().trim().toLong()
-                return raw / 1000.0
-            } catch (e: Exception) {
-                // Ignorar y probar la siguiente ruta
-            }
-        }
-        Log.w(TAG, "No se pudo leer frecuencia CPU en ninguna ruta conocida")
-        return 0.0
+    fun isThermalThrottling(tempC: Double): Boolean {
+        return tempC >= THERMAL_THROTTLING_THRESHOLD_C
     }
 }
 
 // ============================================================
-//  LlaAnalyzer: implementa ImageAnalysis.Analyzer de CameraX
-//  Pipeline: YUV→BGR → CLAHE → Blur → HSV segmentación →
-//            Morfología → ROI → Resize → TFLite INT8
+//  LlaAnalyzer: Soporta AMBOS paradigmas de despliegue:
+//   - Modo Local: Preprocesamiento OpenCV + TensorFlow Lite INT8
+//   - Modo Remoto: Cliente HTTP Multipart -> FastAPI REST FP32
+//  Y soporta tanto frames de Cámara en Vivo como imágenes estáticas
+//  del dataset C-NMC 2019 o de la Galería del teléfono.
 // ============================================================
 class LlaAnalyzer(
     private val context: Context,
-    /** Callback invocado en el hilo del analizador con el resultado de inferencia */
     private val onResult: (InferenceResult) -> Unit,
-    /** Callback invocado cuando el archivo .tflite no se encuentra en assets */
     private val onModelMissing: () -> Unit
 ) : ImageAnalysis.Analyzer {
 
     companion object {
         private const val TAG = "LlaAnalyzer"
-
-        // Nombre del archivo del modelo en la carpeta assets/
         private const val MODEL_FILENAME = "modelo_lla_int8.tflite"
-
-        // Dimensiones de entrada esperadas por el modelo (224×224)
         private const val INPUT_SIZE = 224
 
-        // Índices de clase en el vector de salida del modelo
-        private const val CLASS_ALL = 0  // Blasto leucémico (Acute Lymphoblastic Leukemia)
-        private const val CLASS_HEM = 1  // Hemoglobina / Leucocito normal
-
-        // ---- Parámetros CLAHE iguales al pipeline de entrenamiento (Colab) ----
         private const val CLAHE_CLIP_LIMIT = 2.0
         private val CLAHE_TILE_SIZE = Size(8.0, 8.0)
 
-        // ---- Rango HSV del color púrpura/violeta (tinción Giemsa/Wright) ----
-        // Los blastos leucémicos aparecen en tonos púrpura/azul oscuro
-        private val HSV_LOWER = Scalar(120.0, 30.0, 30.0)   // H_min=120, S_min=30, V_min=30
-        private val HSV_UPPER = Scalar(170.0, 255.0, 255.0) // H_max=170, S_max=255, V_max=255
+        // Rango HSV de célula completa (núcleo + citoplasma sobre fondo oscuro)
+        private val HSV_LOWER = Scalar(0.0, 15.0, 20.0)
+        private val HSV_UPPER = Scalar(180.0, 255.0, 255.0)
 
-        // ---- Tamaño del elemento estructurante para morfología ----
         private val MORPH_KERNEL_SIZE = Size(5.0, 5.0)
-
-        // ---- Padding del 20% alrededor del bounding box del contorno ----
         private const val ROI_PADDING_PERCENT = 0.20
     }
 
-    // Intérprete TFLite; null mientras el modelo no esté disponible
-    private var interpreter: Interpreter? = null
+    @Volatile
+    var isPausedForStaticImage: Boolean = false
 
-    // Buffer de entrada reutilizable: 224×224×3 bytes (UINT8, BGR)
+    @Volatile
+    var useRemoteParadigm: Boolean = false
+
+    @Volatile
+    var remoteServerUrl: String = "http://192.168.18.10:8000/predict"
+
+    private var interpreter: Interpreter? = null
+    private val inferenceLock = Any()
+
     private val inputBuffer: ByteBuffer = ByteBuffer
         .allocateDirect(INPUT_SIZE * INPUT_SIZE * 3)
         .order(ByteOrder.nativeOrder())
 
-    // Buffer de salida para modelo quantizado INT8 (2 clases)
     private val outputBuffer: ByteBuffer = ByteBuffer
-        .allocateDirect(2) // 2 bytes, una por clase
+        .allocateDirect(2)
         .order(ByteOrder.nativeOrder())
 
+    private var lastRemoteFrameTimeMs = 0L
+
     init {
-        // Intentar cargar el modelo al instanciar el analizador
         loadModel()
     }
 
-    // ----------------------------------------------------------
-    //  Carga del modelo TFLite desde la carpeta assets/
-    // ----------------------------------------------------------
     private fun loadModel() {
         try {
             val modelBuffer: MappedByteBuffer = loadModelFile()
             val options = Interpreter.Options().apply {
-                setNumThreads(4)  // Usar 4 hilos para la inferencia
+                setNumThreads(4)
             }
             interpreter = Interpreter(modelBuffer, options)
             Log.i(TAG, "Modelo '$MODEL_FILENAME' cargado correctamente")
         } catch (e: IOException) {
-            // El .tflite aún no existe en assets → notificar a la UI
-            Log.w(TAG, "Modelo no encontrado en assets/: $MODEL_FILENAME — ${e.message}")
+            Log.w(TAG, "Modelo no encontrado en assets/: $MODEL_FILENAME")
             interpreter = null
             onModelMissing()
         } catch (e: Exception) {
@@ -183,10 +208,6 @@ class LlaAnalyzer(
         }
     }
 
-    /**
-     * Abre el archivo del modelo como MappedByteBuffer para evitar
-     * copiar el modelo completo en el heap de Java.
-     */
     private fun loadModelFile(): MappedByteBuffer {
         val assetFd = context.assets.openFd(MODEL_FILENAME)
         val inputStream = FileInputStream(assetFd.fileDescriptor)
@@ -198,154 +219,225 @@ class LlaAnalyzer(
         )
     }
 
-    // ----------------------------------------------------------
-    //  analyze(): punto de entrada del Analyzer de CameraX
-    //  Llamado en el executor del ImageAnalysis use case
-    // ----------------------------------------------------------
     override fun analyze(imageProxy: ImageProxy) {
-        // Si el modelo no está listo, descartar el frame inmediatamente
-        if (interpreter == null) {
+        if (isPausedForStaticImage) {
             imageProxy.close()
             return
         }
 
-        val image = imageProxy.image
-        if (image == null) {
+        if (!useRemoteParadigm && interpreter == null) {
             imageProxy.close()
             return
         }
-
-        // Paso 0: Convertir frame YUV_420_888 a Mat BGR de OpenCV
-        val bgrMat = yuv420ToBgrMat(imageProxy)
 
         try {
-            // Pasos 1-5: Pipeline de preprocesamiento OpenCV
-            val processedMat = preprocessFrame(bgrMat)
+            // En Modo Remoto por cámara en vivo, limitar a ~2 peticiones/seg para no saturar red
+            if (useRemoteParadigm) {
+                val now = System.currentTimeMillis()
+                if (now - lastRemoteFrameTimeMs < 500L) {
+                    imageProxy.close()
+                    return
+                }
+                lastRemoteFrameTimeMs = now
+            }
 
-            // Llenar el buffer de entrada UINT8
-            fillInputBuffer(processedMat)
-            processedMat.release()
-
-            // ---- Inferencia TFLite con medición de latencia ----
-            // Se captura en val local para evitar el smart-cast concurrente sobre la var
-            val startTime = System.currentTimeMillis()
-            val tflite = interpreter ?: return
-            tflite.run(inputBuffer, outputBuffer)
-            val latencyMs = System.currentTimeMillis() - startTime
-
-            // ---- Decodificar salida cuantizada INT8 ----
-            // Los bytes están en rango 0-255 (unsigned); Kotlin ByteArray es signed,
-            // por eso usamos toUByte() antes de convertir a Float.
-            // Leer los dos bytes de salida como valores sin signo (0‑255)
-            outputBuffer.rewind()
-            val rawAll = outputBuffer.get().toUByte().toFloat()
-            val rawHem = outputBuffer.get().toUByte().toFloat()
-            val sumRaw = rawAll + rawHem
-
-            // Normalizar para obtener probabilidades que sumen 1
-            val probAll = if (sumRaw > 0f) rawAll / sumRaw else 0.5f
-            val probHem = if (sumRaw > 0f) rawHem / sumRaw else 0.5f
-
-            // Etiqueta de la clase ganadora
-            val label = if (probAll >= probHem) "ALL" else "HEM"
-
-            // ---- Leer métricas térmicas del dispositivo ----
-            val cpuTemp = ThermalMonitor.readCpuTemperatureCelsius()
-            val cpuFreq = ThermalMonitor.readCpuFrequencyMhz()
-
-            // ---- Notificar resultado a través del callback ----
-            onResult(
-                InferenceResult(
-                    allProbability = probAll,
-                    hemProbability = probHem,
-                    latencyMs = latencyMs,
-                    label = label,
-                    cpuTempC = cpuTemp,
-                    cpuFreqMhz = cpuFreq
-                )
+            val bitmap = imageProxy.toBitmap()
+            val result = evaluateBitmapInternal(
+                bitmap = bitmap,
+                sampleId = "CAMARA_VIVO",
+                groundTruth = "-"
             )
-
+            if (result != null && !isPausedForStaticImage) {
+                onResult(result)
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Error durante el análisis del frame: ${e.message}", e)
+            Log.e(TAG, "Error analizando frame de cámara: ${e.message}", e)
         } finally {
-            // Siempre liberar la Mat y cerrar el frame para no bloquear la cámara
-            bgrMat.release()
             imageProxy.close()
         }
     }
 
-    // ----------------------------------------------------------
-    //  Conversión YUV_420_888 → Mat BGR
-    //  Se leen los planos Y, U, V directamente del ImageProxy
-    //  y se construye un buffer NV21 compatible con OpenCV.
-    // ----------------------------------------------------------
-    private fun yuv420ToBgrMat(imageProxy: ImageProxy): Mat {
-        val image = imageProxy.image!!
-        val width = image.width
-        val height = image.height
-
-        // Obtener los tres planos del formato YUV_420_888
-        val planeY = image.planes[0]  // Luminancia
-        val planeU = image.planes[1]  // Crominancia U (Cb)
-        val planeV = image.planes[2]  // Crominancia V (Cr)
-
-        val bufY = planeY.buffer
-        val bufU = planeU.buffer
-        val bufV = planeV.buffer
-
-        val ySize = bufY.remaining()
-        val uSize = bufU.remaining()
-        val vSize = bufV.remaining()
-
-        // Buffer NV21: plano Y completo, luego V y U intercalados
-        val nv21 = ByteArray(ySize + uSize + vSize)
-
-        // Copiar plano Y
-        bufY.get(nv21, 0, ySize)
-
-        // Leer U y V en arrays separados para intercalar correctamente
-        val vArr = ByteArray(vSize)
-        val uArr = ByteArray(uSize)
-        bufV.get(vArr)
-        bufU.get(uArr)
-
-        // Intercalar V,U (formato NV21 = plano Y + plano interleaved V,U)
-        var idx = ySize
-        val chromaCount = minOf(vSize, uSize)
-        for (i in 0 until chromaCount) {
-            nv21[idx++] = vArr[i]
-            if (idx < nv21.size) nv21[idx++] = uArr[i]
-        }
-
-        // Crear Mat con dimensiones NV21 (height * 3/2, width) en escala de grises
-        val nv21Mat = Mat(height + height / 2, width, CvType.CV_8UC1)
-        nv21Mat.put(0, 0, nv21)
-
-        // Convertir NV21 → BGR (formato de trabajo de OpenCV)
-        val bgrMat = Mat()
-        Imgproc.cvtColor(nv21Mat, bgrMat, Imgproc.COLOR_YUV2BGR_NV21)
-        nv21Mat.release()
-
-        return bgrMat
+    /**
+     * Evalúa cualquier imagen estática (Muestra C-NMC 2019 o imagen de Galería)
+     * bajo el paradigma actualmente seleccionado (Modo Local INT8 o Modo Remoto API REST FP32).
+     */
+    fun evaluateStaticBitmap(
+        bitmap: Bitmap,
+        sampleId: String,
+        groundTruth: String
+    ): InferenceResult? {
+        return evaluateBitmapInternal(bitmap, sampleId, groundTruth)
     }
 
-    // ----------------------------------------------------------
-    //  Pipeline de preprocesamiento OpenCV
-    //  Mismo orden que el Colab de entrenamiento del modelo
-    // ----------------------------------------------------------
-    private fun preprocessFrame(bgrMat: Mat): Mat {
+    private fun evaluateBitmapInternal(
+        bitmap: Bitmap,
+        sampleId: String,
+        groundTruth: String
+    ): InferenceResult? {
+        return if (useRemoteParadigm) {
+            runRemoteApiRestInference(bitmap, sampleId, groundTruth)
+        } else {
+            runLocalTfliteInt8Inference(bitmap, sampleId, groundTruth)
+        }
+    }
 
-        // =====================================================
-        // PASO 1: Normalización de color con CLAHE en LAB
-        //         Mejora el contraste de la tinción Giemsa
-        // =====================================================
+    private fun runLocalTfliteInt8Inference(
+        bitmap: Bitmap,
+        sampleId: String,
+        groundTruth: String
+    ): InferenceResult? {
+        synchronized(inferenceLock) {
+            val tflite = interpreter ?: return null
+            val rgbaMat = Mat()
+            val bgrMat = Mat()
+            try {
+                val startTimeNs = UnifiedPerformanceModule.startTimerNs()
+
+                Utils.bitmapToMat(bitmap, rgbaMat)
+                Imgproc.cvtColor(rgbaMat, bgrMat, Imgproc.COLOR_RGBA2BGR)
+
+                val processedRgbMat = preprocessFrame(bgrMat)
+                fillInputBuffer(processedRgbMat)
+                processedRgbMat.release()
+
+                // CRÍTICO: Rebobinar TANTO inputBuffer como outputBuffer antes de cada inferencia
+                inputBuffer.rewind()
+                outputBuffer.rewind()
+
+                tflite.run(inputBuffer, outputBuffer)
+
+                val latencyMs = UnifiedPerformanceModule.measureLatencyMs(startTimeNs)
+                val ramMb = UnifiedPerformanceModule.readRamUsageMb()
+                val cpuTemp = UnifiedPerformanceModule.readTemperatureCelsius(context)
+                val cpuFreq = UnifiedPerformanceModule.readCpuFrequencyMhz()
+                val throttling = UnifiedPerformanceModule.isThermalThrottling(cpuTemp)
+
+                outputBuffer.rewind()
+                val rawAll = outputBuffer.get().toUByte().toFloat()
+                val rawHem = outputBuffer.get().toUByte().toFloat()
+                val sumRaw = rawAll + rawHem
+
+                val probAll = if (sumRaw > 0f) rawAll / sumRaw else 0.5f
+                val probHem = if (sumRaw > 0f) rawHem / sumRaw else 0.5f
+                val label = if (probAll >= probHem) "ALL" else "HEM"
+
+                return InferenceResult(
+                    paradigmName = "Modo_Local_INT8",
+                    sampleId = sampleId,
+                    groundTruthLabel = groundTruth,
+                    allProbability = probAll,
+                    hemProbability = probHem,
+                    label = label,
+                    latencyMs = latencyMs,
+                    ramUsageMb = ramMb,
+                    cpuTempC = cpuTemp,
+                    cpuFreqMhz = cpuFreq,
+                    thermalThrottling = throttling
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Error en inferencia local INT8: ${e.message}", e)
+                return null
+            } finally {
+                rgbaMat.release()
+                bgrMat.release()
+            }
+        }
+    }
+
+    private fun runRemoteApiRestInference(
+        bitmap: Bitmap,
+        sampleId: String,
+        groundTruth: String
+    ): InferenceResult {
+        val startTimeNs = UnifiedPerformanceModule.startTimerNs()
+        val boundary = "----LLABoundary" + System.currentTimeMillis()
+        var conn: HttpURLConnection? = null
+        try {
+            val baos = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+            val imageBytes = baos.toByteArray()
+
+            val url = URL(remoteServerUrl)
+            conn = (url.openConnection() as HttpURLConnection).apply {
+                connectTimeout = 5000
+                readTimeout = 8000
+                doInput = true
+                doOutput = true
+                useCaches = false
+                requestMethod = "POST"
+                setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            }
+
+            DataOutputStream(conn.outputStream).use { dos ->
+                dos.writeBytes("--$boundary\r\n")
+                dos.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"$sampleId.png\"\r\n")
+                dos.writeBytes("Content-Type: image/png\r\n\r\n")
+                dos.write(imageBytes)
+                dos.writeBytes("\r\n--$boundary--\r\n")
+                dos.flush()
+            }
+
+            val code = conn.responseCode
+            if (code == HttpURLConnection.HTTP_OK) {
+                val respText = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(respText)
+                val probAll = json.optDouble("allProbability", 0.5).toFloat()
+                val probHem = json.optDouble("hemProbability", 0.5).toFloat()
+                val label = json.optString("label", if (probAll >= probHem) "ALL" else "HEM")
+
+                val latencyMs = UnifiedPerformanceModule.measureLatencyMs(startTimeNs)
+                val ramMb = UnifiedPerformanceModule.readRamUsageMb()
+                val cpuTemp = UnifiedPerformanceModule.readTemperatureCelsius(context)
+                val cpuFreq = UnifiedPerformanceModule.readCpuFrequencyMhz()
+                val throttling = UnifiedPerformanceModule.isThermalThrottling(cpuTemp)
+
+                return InferenceResult(
+                    paradigmName = "Modo_Remoto_FP32",
+                    sampleId = sampleId,
+                    groundTruthLabel = groundTruth,
+                    allProbability = probAll,
+                    hemProbability = probHem,
+                    label = label,
+                    latencyMs = latencyMs,
+                    ramUsageMb = ramMb,
+                    cpuTempC = cpuTemp,
+                    cpuFreqMhz = cpuFreq,
+                    thermalThrottling = throttling
+                )
+            } else {
+                throw IOException("HTTP $code")
+            }
+        } catch (e: Exception) {
+            val latencyMs = UnifiedPerformanceModule.measureLatencyMs(startTimeNs)
+            val ramMb = UnifiedPerformanceModule.readRamUsageMb()
+            val cpuTemp = UnifiedPerformanceModule.readTemperatureCelsius(context)
+            val cpuFreq = UnifiedPerformanceModule.readCpuFrequencyMhz()
+            return InferenceResult(
+                paradigmName = "Modo_Remoto_FP32",
+                sampleId = sampleId,
+                groundTruthLabel = groundTruth,
+                allProbability = 0f,
+                hemProbability = 0f,
+                label = "ERROR_RED",
+                latencyMs = latencyMs,
+                ramUsageMb = ramMb,
+                cpuTempC = cpuTemp,
+                cpuFreqMhz = cpuFreq,
+                thermalThrottling = false,
+                errorMessage = "Sin conexión con $remoteServerUrl (${e.javaClass.simpleName})"
+            )
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    private fun preprocessFrame(bgrMat: Mat): Mat {
         val labMat = Mat()
         Imgproc.cvtColor(bgrMat, labMat, Imgproc.COLOR_BGR2Lab)
 
         val labChannels = ArrayList<Mat>(3)
         Core.split(labMat, labChannels)
 
-        // CLAHE sobre el canal L* (luminancia); los canales a* y b* no cambian
         val clahe = Imgproc.createCLAHE(CLAHE_CLIP_LIMIT, CLAHE_TILE_SIZE)
         clahe.apply(labChannels[0], labChannels[0])
 
@@ -356,18 +448,10 @@ class LlaAnalyzer(
         labMat.release()
         labChannels.forEach { it.release() }
 
-        // =====================================================
-        // PASO 2: Suavizado Gaussiano con kernel 3×3
-        //         Reduce ruido de alta frecuencia
-        // =====================================================
         val blurredMat = Mat()
         Imgproc.GaussianBlur(normalizedBGR, blurredMat, Size(3.0, 3.0), 0.0)
         normalizedBGR.release()
 
-        // =====================================================
-        // PASO 3: Segmentación HSV — rango de color púrpura
-        //         Aísla el contenido nuclear teñido con Giemsa
-        // =====================================================
         val hsvMat = Mat()
         Imgproc.cvtColor(blurredMat, hsvMat, Imgproc.COLOR_BGR2HSV)
 
@@ -375,11 +459,6 @@ class LlaAnalyzer(
         Core.inRange(hsvMat, HSV_LOWER, HSV_UPPER, mask)
         hsvMat.release()
 
-        // =====================================================
-        // PASO 4a: Morfología — CLOSE luego OPEN
-        //          CLOSE: rellena huecos dentro de la célula
-        //          OPEN: elimina artefactos pequeños del fondo
-        // =====================================================
         val kernel = Imgproc.getStructuringElement(
             Imgproc.MORPH_ELLIPSE,
             MORPH_KERNEL_SIZE
@@ -394,9 +473,6 @@ class LlaAnalyzer(
         closedMask.release()
         kernel.release()
 
-        // =====================================================
-        // PASO 4b: Detectar contorno más grande (célula principal)
-        // =====================================================
         val contours = ArrayList<MatOfPoint>()
         val hierarchy = Mat()
         Imgproc.findContours(
@@ -409,7 +485,6 @@ class LlaAnalyzer(
         openedMask.release()
         hierarchy.release()
 
-        // Calcular ROI con 20% de padding alrededor del contorno más grande
         val roi: Rect = if (contours.isNotEmpty()) {
             val largest = contours.maxByOrNull { Imgproc.contourArea(it) }!!
             val bbox = Imgproc.boundingRect(largest)
@@ -424,20 +499,14 @@ class LlaAnalyzer(
 
             Rect(x1, y1, x2 - x1, y2 - y1)
         } else {
-            // Sin contorno detectado → imagen completa como fallback
-            Log.d(TAG, "Sin contorno válido; se usa la imagen completa como ROI")
             Rect(0, 0, blurredMat.cols(), blurredMat.rows())
         }
 
         contours.forEach { it.release() }
 
-        // Recortar región de interés de la imagen normalizada+suavizada
-        val roiMat = blurredMat.submat(roi).clone()  // clone para independizar de blurredMat
+        val roiMat = blurredMat.submat(roi).clone()
         blurredMat.release()
 
-        // =====================================================
-        // PASO 5: Redimensionar a 224×224 (entrada del modelo)
-        // =====================================================
         val resizedMat = Mat()
         Imgproc.resize(
             roiMat,
@@ -448,29 +517,21 @@ class LlaAnalyzer(
         )
         roiMat.release()
 
-        return resizedMat
+        val rgbMat = Mat()
+        Imgproc.cvtColor(resizedMat, rgbMat, Imgproc.COLOR_BGR2RGB)
+        resizedMat.release()
+
+        return rgbMat
     }
 
-    // ----------------------------------------------------------
-    //  Llenar ByteBuffer UINT8 a partir de Mat BGR 224×224
-    //  El modelo fue entrenado con valores en rango [0, 255]
-    // ----------------------------------------------------------
     private fun fillInputBuffer(mat: Mat) {
         inputBuffer.rewind()
-
-        // Extraer todos los píxeles como array de bytes: [B, G, R, B, G, R, ...]
         val pixels = ByteArray(INPUT_SIZE * INPUT_SIZE * 3)
         mat.get(0, 0, pixels)
-
-        // Copiar directo al buffer (sin normalización flotante — el modelo es UINT8)
         inputBuffer.put(pixels)
         inputBuffer.rewind()
     }
 
-    /**
-     * Liberar el intérprete TFLite cuando el analizador ya no se necesite.
-     * Llamar desde onDestroy() de la Activity.
-     */
     fun release() {
         interpreter?.close()
         interpreter = null

@@ -1,98 +1,108 @@
-# 🔬 Detector de Indicios de Leucemia Linfoblástica Aguda (LLA) — Android
+# Detector de Indicios de Leucemia Linfoblástica Aguda (LLA) en Android (MVP v2.0)
 
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com/)
 [![Kotlin](https://img.shields.io/badge/Language-Kotlin-blue.svg)](https://kotlinlang.org/)
-[![TensorFlow Lite](https://img.shields.io/badge/ML-TensorFlow%20Lite%20INT8-orange.svg)](https://www.tensorflow.org/lite)
-[![OpenCV](https://img.shields.io/badge/Vision-OpenCV%204.12-red.svg)](https://opencv.org/)
+[![TensorFlow Lite](https://img.shields.io/badge/Edge_AI-TFLite_INT8-orange.svg)](https://www.tensorflow.org/lite)
+[![FastAPI](https://img.shields.io/badge/Cloud_API-FastAPI_FP32-009688.svg)](https://fastapi.tiangolo.com/)
+[![OpenCV](https://img.shields.io/badge/Vision-OpenCV_4.12-red.svg)](https://opencv.org/)
 
-Prototipo de aplicación móvil para la asistencia en el tamizaje preliminar de **Leucemia Linfoblástica Aguda (LLA)** a partir de imágenes microscópicas de frotis de sangre periférica. 
+Prototipo funcional (MVP v2.0) de aplicación móvil Android para el apoyo al cribado preliminar de **Leucemia Linfoblástica Aguda (LLA)** en imágenes microscópicas de frotis de sangre periférica, implementando una arquitectura experimental dual para evaluar comparativamente la inferencia local en el borde (*Edge AI*) frente a la inferencia remota cliente-servidor.
 
-Desarrollado como proyecto de tesis de pregrado en **Ingeniería de Software — Universidad San Ignacio de Loyola (USIL)**.
-
----
-
-## 📌 Descripción del Proyecto
-
-El sistema captura imágenes de muestras sanguíneas en tiempo real mediante **CameraX**, procesa los leucocitos a través de un pipeline automatizado con **OpenCV** y clasifica las células mediante una red neuronal convolucional (**MobileNetV2**) optimizada para inferencia en el borde (*Edge AI*) con **TensorFlow Lite**.
-
-### Características Principales
-- **Procesamiento de imagen en el dispositivo (*Edge Computing*):** Todo el análisis se realiza localmente sin requerir conexión a internet ni servidores externos.
-- **Pipeline de Visión Computacional Robusto:** Normalización de contraste y variación de tinción entre laboratorios usando espacio de color LAB y ecualización adaptativa (CLAHE).
-- **Segmentación celular:** Aislamiento del leucocito mediante filtrado morfológico y segmentación en espacio de color HSV (tinción Giemsa).
-- **Inferencia Cuantizada:** Red MobileNetV2 cuantizada a enteros de 8 bits (**TFLite INT8**), permitiendo baja latencia y mínimo consumo energético en procesadores móviles ARM.
-- **Monitoreo de Telemetría Térmica y Rendimiento:** Lectura en tiempo real de temperatura CPU y frecuencia de reloj vía `sysfs` para análisis de viabilidad térmica en despliegue clínico.
+Desarrollado como parte del trabajo de investigación de pregrado en **Ingeniería de Software en la Universidad San Ignacio de Loyola (USIL)** por **José Manuel Mariaca Patiño**.
 
 ---
 
-## ⚙️ Arquitectura del Pipeline de Visión e Inferencia
+## Descripción General
+
+El sistema permite capturar o evaluar láminas citológicas de células sanguíneas (linfoblastos malignos `ALL` frente a células hematopoyéticas sanas `HEM`) utilizando una red neuronal convolucional **EfficientNet-B0** entrenada mediante aprendizaje por transferencia sobre el conjunto de datos clínico público **C-NMC 2019** (*ISBI Challenge*).
+
+Para responder a los objetivos de investigación sin introducir sesgos de interfaz o de hardware, la aplicación integra ambos paradigmas de despliegue (Variable Independiente $V_1$) dentro de un mismo cliente Android, manteniendo constantes el preprocesamiento con **OpenCV** y el recolector de telemetría de rendimiento (`UnifiedPerformanceModule`).
+
+### Funcionalidades Principales del MVP v2.0
+
+1. **Conmutador de Paradigma de Inferencia ($V_1$):**
+   - **Modo Local (Edge AI - TFLite INT8):** Ejecuta el modelo cuantizado (`modelo_lla_int8.tflite`, $4.67\text{ MB}$) directamente en el procesador ARM del teléfono sin requerir conexión a internet ni transmitir datos fuera del dispositivo.
+   - **Modo Remoto (Cliente-Servidor - API REST FP32):** Envía el recorte celular en memoria mediante una petición `HTTP POST` multiparte hacia el servidor **FastAPI / Uvicorn** (`server/servidor_remoto_fp32.py`), el cual ejecuta el modelo original en precisión completa de 32 bits (`FP32`). Una pulsación larga sobre el botón superior permite configurar la dirección IP del servidor en red local.
+2. **Triple Flujo de Entrada de Muestras:**
+   - **Muestra C-NMC (`[ Muestra C-NMC ]`):** Carga secuencialmente 20 imágenes clínicas reales de validación del dataset *C-NMC 2019* (10 casos `ALL` y 10 casos `HEM` intercalados en `app/src/main/assets/dataset_cnmc/`) y verifica automáticamente si la predicción coincide con la etiqueta real (`ACIERTO` / `ERROR`).
+   - **Galería (`[ Galería ]`):** Permite analizar láminas almacenadas en la memoria del dispositivo mediante el selector nativo de Android.
+   - **Cámara en Vivo (`[ Cámara ]`):** Flujo continuo con `CameraX` (`STRATEGY_KEEP_ONLY_LATEST`) para evaluar muestras directamente a través del ocular del microscopio.
+3. **Módulo Unificado de Telemetría (`UnifiedPerformanceModule`):**
+   - Registra de forma atómica tras cada inferencia los 4 indicadores técnicos de rendimiento del Instrumento 2: **Latencia total de respuesta ($\text{ms}$)**, **Consumo de memoria RAM nativa y Java Heap ($\text{MB}$)**, **Temperatura del dispositivo ($^\circ\text{C}$)** y **Frecuencia del procesador ($\text{MHz}$)**.
+4. **Modo de Pantalla Completa Inmersiva:**
+   - Ocultamiento automático de las barras de navegación del sistema (`WindowInsetsControllerCompat`) para evitar solapamientos con el panel inferior de controles y telemetría.
+
+---
+
+## Arquitectura del Flujo de Procesamiento
 
 ```text
-[ Entrada de Cámara (CameraX / YUV_420_888) ]
-                     │
-                     ▼
-       Conversión a Matriz OpenCV (BGR)
-                     │
-                     ▼
-  1. Normalización de Color (Espacio LAB + CLAHE en canal L)
-                     │
-                     ▼
-  2. Reducción de Ruido (Filtro Gaussiano 3x3)
-                     │
-                     ▼
-  3. Segmentación de Tinción Giemsa (Rango Púrpura en HSV)
-                     │
-                     ▼
-  4. Operaciones Morfológicas (Closing + Opening elíptico)
-                     │
-                     ▼
-  5. Detección de Contorno y Extracción de Región de Interés (ROI)
-                     │
-                     ▼
-  6. Redimensionamiento a 224x224 px y Normalización [0, 1]
-                     │
-                     ▼
-[ Inferencia TFLite INT8 (MobileNetV2 Transfer Learning) ]
-                     │
-                     ▼
-  Resultados: ALL (Blasto) vs. HEM (Normal) + Latencia + Temp CPU
+[ Entrada: Cámara en Vivo (CameraX) | Muestra C-NMC (Assets) | Galería ]
+                                   │
+                                   ▼
+         1. Conversión a Matriz OpenCV y Normalización CLAHE (LAB)
+                                   │
+                                   ▼
+         2. Suavizado Gaussiano (3x3) y Segmentación HSV (Tinción Giemsa)
+                                   │
+                                   ▼
+         3. Operaciones Morfológicas y Extracción de Región de Interés (ROI)
+                                   │
+                                   ▼
+         4. Redimensionamiento Bilineal a 224x224 px (RGB)
+                                   │
+                    ┌──────────────┴──────────────┐
+                    ▼                             ▼
+     [ MODO LOCAL: Edge AI ]       [ MODO REMOTO: API REST ]
+     Intérprete TFLite INT8        Petición HTTP POST /predict
+     en dispositivo móvil          hacia servidor FastAPI FP32
+                    │                             │
+                    └──────────────┬──────────────┘
+                                   ▼
+         5. Clasificación (ALL vs HEM) + UnifiedPerformanceModule
+            (Latencia ms | RAM MB | Temperatura °C | CPU MHz)
 ```
 
 ---
 
-## 🛠️ Tecnologías y Herramientas
+## Estructura del Proyecto
 
-- **Lenguaje:** Kotlin 1.9+
-- **Framework Móvil:** Android SDK (Min SDK: 24, Target SDK: 34+)
-- **Captura de Cámara:** Android Jetpack CameraX 1.3.0
-- **Visión Computacional:** OpenCV Android SDK 4.12.0
-- **Machine Learning Runtime:** TensorFlow Lite 2.16.1
-- **Dataset de Entrenamiento:** ALL-IDB / C-NMC 2019 (*Leukemia Challenge Dataset*)
-- **Entorno de Entrenamiento:** Python 3.10, TensorFlow/Keras, Google Colab GPU
-
----
-
-## 🚀 Requisitos e Instalación
-
-### Requisitos Previos
-- Android Studio Ladybug / Koala o superior
-- JDK 17
-- Dispositivo Android físico con cámara (API 24+)
-
-### Pasos para compilar
-1. Clonar el repositorio:
-   ```bash
-   git clone https://github.com/TU-USUARIO/detector-leucemia-android.git
-   ```
-2. Abrir el proyecto en **Android Studio**.
-3. Sincronizar las dependencias con **Gradle**.
-4. Colocar el modelo cuantizado en `app/src/main/assets/modelo_lla_int8.tflite` (si no está incluido).
-5. Conectar tu dispositivo y hacer clic en **Run** (`Shift + F10`).
+- `app/src/main/java/com/example/detectorpatrones/`
+  - `MainActivity.kt`: Controlador principal de interfaz, modo inmersivo, selector de paradigma Local/Remoto y flujos de entrada (Cámara, Galería y Muestra C-NMC).
+  - `LlaAnalyzer.kt`: Pipeline de preprocesamiento con OpenCV, inferencia local con TensorFlow Lite INT8, cliente HTTP para inferencia remota FP32 y clase `UnifiedPerformanceModule`.
+- `app/src/main/res/layout/activity_main.xml`: Diseño de interfaz oscura con visor de cámara/muestra, tarjeta de diagnóstico y panel de control.
+- `app/src/main/assets/`
+  - `modelo_lla_int8.tflite`: Modelo `EfficientNet-B0` cuantizado a 8 bits (`INT8`).
+  - `dataset_cnmc/`: 20 imágenes citológicas reales de validación del dataset *C-NMC 2019*.
+- `server/servidor_remoto_fp32.py`: Servidor backend en Python con **FastAPI** y **TensorFlow** para ejecutar el paradigma de inferencia remota en precisión `FP32`.
 
 ---
 
-## 👤 Autor
+## Requisitos e Instalación
 
-**José Manuel Mariaca**  
-- Carrera: Ingeniería de Software — Universidad San Ignacio de Loyola (USIL)  
-- LinkedIn: [linkedin.com/in/josemariaca](https://www.linkedin.com/in/josemariaca/)  
-- Email: jmariacapatino@gmail.com
+### 1. Aplicación Android (Cliente Móvil)
+- **Requisitos:** Android Studio Ladybug o superior, JDK 17, dispositivo físico Android (API 24+).
+- **Compilación:**
+  1. Clonar el repositorio:
+     ```bash
+     git clone https://github.com/jmariacapatino/detector-leucemia-android.git
+     ```
+  2. Abrir el proyecto en Android Studio y sincronizar Gradle.
+  3. Ejecutar en el dispositivo físico (`Run 'app'`) o generar el APK mediante `./gradlew assembleDebug`.
+
+### 2. Servidor de Inferencia Remota (Paradigma Cliente-Servidor FP32)
+- **Requisitos:** Python 3.10+, TensorFlow, FastAPI, Uvicorn, Pillow, NumPy, Python-Multipart.
+- **Ejecución en red local:**
+  ```bash
+  pip install fastapi uvicorn tensorflow pillow numpy python-multipart
+  python server/servidor_remoto_fp32.py
+  ```
+- En la aplicación Android, mantener presionado el botón superior de modo para ingresar la dirección IP local de la computadora (`http://<IP_LOCAL>:8000/predict`).
+
+---
+
+## Autor
+
+**José Manuel Mariaca Patiño**  
+- Carrera: Ingeniería de Software — Universidad San Ignacio de Loyola (USIL), Lima, Perú  
+- Contacto: jmariacapatino@gmail.com

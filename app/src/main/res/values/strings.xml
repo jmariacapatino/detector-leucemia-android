@@ -56,7 +56,7 @@
     <string name="latency_temp_format">Latencia: %1$dms  |  CPU Temp: %2$s</string>
 
     <!-- Valor mostrado antes de recibir el primer resultado -->
-    <string name="latency_temp_default">Latencia: — ms  |  CPU Temp: — °C</string>
+    <string name="latency_temp_default">Lat: - ms | RAM: - MB | Temp: - °C | CPU: - MHz</string>
 
     <!-- Cuando el sensor de temperatura no es accesible -->
     <string name="temp_unavailable">N/D</string>
